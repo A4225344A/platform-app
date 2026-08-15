@@ -7,7 +7,17 @@ ASP.NET Core (.NET 8) 生產就緒範例服務,提供結構化日誌、liveness/
 ```
 app/
 ├── .gitignore
+├── .dockerignore
+├── Dockerfile                         # 多階段建置,非 root,Alpine 基底(<150MB)
+├── LICENSE
+├── CONTRIBUTING.md                    # 分支策略、PR 流程、branch protection 建議設定
 ├── README.md                          # 本文件
+├── .github/
+│   ├── CODEOWNERS
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── workflows/
+│       ├── ci.yml                     # 每個 PR / push main 跑 build + test
+│       └── docker-publish.yml         # push main 或打 tag 時建置並推到 GHCR
 └── src/
     ├── PlatformService.sln            # 方案檔,包含以下兩個專案
     │
@@ -137,6 +147,27 @@ flowchart TB
 | `Microsoft.NET.Test.Sdk` | 17.8.0 | .NET 測試 SDK |
 | `Microsoft.AspNetCore.Mvc.Testing` | 8.0.15 | 提供 `WebApplicationFactory<Program>`,啟動 in-memory `TestServer` 做整合測試 |
 | `coverlet.collector` | 6.0.0 | 程式碼覆蓋率收集 |
+
+## CI/CD 與容器化
+
+這個 repo 獨立於基礎設施(`platform-infra`)之外,是它自己的版控單位,CI 完全不需要任何 AWS 憑證:
+
+| Workflow | 觸發時機 | 做什麼 |
+|----------|----------|--------|
+| `.github/workflows/ci.yml` | 每個 PR、push 到 `main` | `dotnet build` + `dotnet test`,測試結果上傳為 artifact |
+| `.github/workflows/docker-publish.yml` | push 到 `main`、或打 `vX.Y.Z` tag | 用根目錄的 `Dockerfile` 建置映像,推到 `ghcr.io/<owner>/platform-service`,標籤含 short SHA、semver(若為 tag)、`latest`(僅 `main`) |
+
+**為什麼推到 GHCR 而不是直接推 ECR**:這個 repo 只負責「建置與驗證這支服務」,不對任何雲端廠商負責——用內建的 `GITHUB_TOKEN` 就能推 GHCR,不用在這裡存放任何 AWS 憑證。把特定版本的映像**promote** 進實際環境(AWS ECR、或換雲後的 GCP Artifact Registry)是部署/基礎設施那個 repo 的責任,兩者的邊界刻意切開,對應 W1 文件「已知取捨」提到的:Terraform 層的可攜性綁定已完全隔離,CI 腳本層在部署邊界仍有一小段雲端專屬的膠水程式碼,但那段程式碼不屬於這個 repo。
+
+`Dockerfile` 採多階段建置(`sdk:8.0-alpine` 建置 → `aspnet:8.0-alpine` 執行),使用 .NET 8+ 內建的非 root `app` 使用者(`USER $APP_UID`),最終映像目標 < 150MB:
+
+```bash
+docker build -t platform-service:local .
+docker run --rm -p 8080:8080 platform-service:local
+curl http://localhost:8080/healthz
+```
+
+分支策略、PR 流程、branch protection 建議設定見 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 測試
 

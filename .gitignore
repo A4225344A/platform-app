@@ -5,4 +5,12 @@ obj/
 # IDE
 .vs/
 .vscode/
+.idea/
 *.user
+
+# secrets / local env
+.env
+.env.*
+
+# logs
+*.log
