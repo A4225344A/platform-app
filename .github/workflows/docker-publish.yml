@@ -1,10 +1,9 @@
 name: Docker Publish
 
-# Publishes to GHCR (ghcr.io), not directly to any cloud vendor's registry (e.g. ECR).
-# This keeps the app repo's CI cloud-agnostic and credential-free (uses the built-in
-# GITHUB_TOKEN, no AWS secrets here). Promoting a specific tag from GHCR into a given
-# environment's registry (ECR, Artifact Registry, ...) is the deploy/infra repo's job,
-# not this one's — see platform-infra task 6.
+# Publishes to GHCR (ghcr.io) as the primary, cloud-agnostic registry (built-in
+# GITHUB_TOKEN, no AWS secrets). It also pushes a backup copy to ECR via OIDC
+# (no static AWS keys either) — see the ECR steps below — purely as a redundant
+# copy; deploy-app.yml in platform-infra still pulls from GHCR, not ECR.
 
 on:
   push:
@@ -14,6 +13,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write   # OIDC 換證(推 ECR 那幾步)必須開這個權限
 
 env:
   # SERVICE_NAME 沒填 repo variable 時,退回 GHCR image 目前用的固定名稱,
