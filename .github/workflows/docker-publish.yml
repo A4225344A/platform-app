@@ -16,7 +16,10 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/platform-service
+  # SERVICE_NAME 沒填 repo variable 時,退回 GHCR image 目前用的固定名稱,
+  # 避免 fork 這份 repo 的人沒先設定變數就直接跑,workflow 卻整個空白失敗。
+  SERVICE_NAME: ${{ vars.SERVICE_NAME || 'platform-service' }}
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/${{ vars.SERVICE_NAME || 'platform-service' }}
 
 jobs:
   build-and-push:
@@ -50,3 +53,38 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: 通知 platform-infra 部署最新映像
+        if: github.ref == 'refs/heads/main'
+        # INFRA_REPO 是 "擁有者/repo 名稱" 格式的 repo variable(例如 A4225344A/platform-infra),
+        # 沒設就退回目前用的固定值,理由同上面 SERVICE_NAME。
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.INFRA_DISPATCH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ vars.INFRA_REPO || 'A4225344A/platform-infra' }}/dispatches" \
+            -d '{"event_type":"app-image-published"}'
+
+      # 以下為 ECR 備援推送:GHCR 是主要 registry(上面步驟),這裡另外把同一份
+      # image 也推一份到 ECR,單純備份,不是給 deploy-app.yml 拉的來源(那邊仍拉 GHCR)。
+      # 只在 push 到 main 時跑——role 的信任條件只認 main 分支,tag 觸發的執行會在
+      # AssumeRoleWithWebIdentity 這步失敗,所以用 if 直接跳過,不留一個註定失敗的步驟。
+      - name: 設定 AWS 憑證(OIDC,備援推送 ECR 用)
+        if: github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.GHA_APP_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+
+      - name: Log in to ECR
+        if: github.ref == 'refs/heads/main'
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push 到 ECR(打 git SHA 標籤——ECR repo 是 IMMUTABLE,不能重複推 latest)
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
