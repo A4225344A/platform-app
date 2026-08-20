@@ -47,6 +47,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: build          # 給這步一個 id,才能引用它的 digest output
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -54,16 +55,18 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: 通知 platform-infra 部署最新映像
+      - name: 通知 platform-infra 部署最新映像(帶 digest)
         if: github.ref == 'refs/heads/main'
         # INFRA_REPO 是 "擁有者/repo 名稱" 格式的 repo variable(例如 A4225344A/platform-infra),
-        # 沒設就退回目前用的固定值,理由同上面 SERVICE_NAME。
-        run: |
-          curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.INFRA_DISPATCH_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ vars.INFRA_REPO || 'A4225344A/platform-infra' }}/dispatches" \
-            -d '{"event_type":"app-image-published"}'
+        # 沒設就退回目前用的固定值,理由同上面 SERVICE_NAME。用 repository-dispatch action
+        # 而非 curl,是為了能把 build 產出的 digest(而非可被覆寫的 tag)一起帶給
+        # platform-infra,讓 GitOps manifest 釘的是 bit-for-bit 的映像版本。
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          repository: ${{ vars.INFRA_REPO || 'A4225344A/platform-infra' }}
+          event-type: app-image-published
+          client-payload: '{"digest": "${{ steps.build.outputs.digest }}"}'
 
       # 以下為 ECR 備援推送:GHCR 是主要 registry(上面步驟),這裡另外把同一份
       # image 也推一份到 ECR,單純備份,不是給 deploy-app.yml 拉的來源(那邊仍拉 GHCR)。
