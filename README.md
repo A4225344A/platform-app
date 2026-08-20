@@ -1,4 +1,4 @@
-# PlatformService
+# PlatformService 
 
 ASP.NET Core (.NET 8) 生產就緒範例服務,提供結構化日誌、liveness/readiness 健康檢查、Prometheus 指標,以及優雅關閉。專案位於 `app/src`,以 `PlatformService.sln` 串接主專案與測試專案。
 
